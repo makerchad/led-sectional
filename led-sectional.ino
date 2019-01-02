@@ -5,8 +5,8 @@ using namespace std;
 
 #define FASTLED_ESP8266_RAW_PIN_ORDER
 
-#define NUM_AIRPORTS 62 // This is really the number of LEDs
-#define WIND_THRESHOLD 25 // Maximum windspeed for green
+#define NUM_AIRPORTS 50 // This is really the number of LEDs
+#define WIND_THRESHOLD 20 // Maximum windspeed for green
 #define LIGHTNING_INTERVAL 5000 // ms - how often should lightning strike; not precise because we sleep in-between
 #define DO_LIGHTNING true // Lightning uses more power, but is cool.
 #define DO_WINDS true // color LEDs for high winds
@@ -18,6 +18,9 @@ using namespace std;
 
 const char ssid[] = "EDITME";        // your network SSID (name)
 const char pass[] = "EDITME";    // your network password (use for WPA, or use as key for WEP)
+uint8_t* BSSID; // We'll use these to stick to one network
+int32_t channel = -1;
+
 boolean ledStatus = true; // used so leds only indicate connection status on first boot, or after failure
 unsigned int lightningLoops;
 
@@ -37,73 +40,61 @@ CRGB leds[NUM_AIRPORTS];
 
 std::vector<unsigned short int> lightningLeds;
 std::vector<String> airports({
-  "KKIC", // order of LEDs, starting with 1 should be KKIC; use VFR, WVFR, MVFR, IFR, LIFR for key; NULL for no airport
-  "KMRY", // 2
-  "KSNS", // 3
-  "KCVH", // 4
-  "KE16", // 5
-  "KWVI", // 6
-  "KRHV", // 7
-  "KSJC", // 8
-  "KNUQ", // 9
-  "KPAO", // 10
-  "KSQL", // 11
-  "KHAF", // 12
-  "KSFO", // 13
-  "KOAK", // 14
-  "KHWD", // 15
-  "KLVK", // 16
-  "KC83", // 17
-  "NULL", // 18 empty
-  "KCCR", // 19
-  "KSUU", // 20
-  "KVCB", // 21
-  "KAPC", // 22
-  "KDVO", // 23
-  "KO69", // 24
-  "KSTS", // 25
-  "KHES", // 26
-  "NULL", // 27 empty
-  "KUKI", // 28
-  "KRBL", // 29
-  "NULL", // 30 empty
-  "KCIC", // 31
-  "NULL", // 32 empty
-  "KOVE", // 33
-  "NULL", // 34 empty
-  "KMYV", // 35
-  "KBAB", // 36
-  "KAUN", // 37
-  "KLHM", // 38
-  "KSMF", // 39
-  "KEDU", // 40
-  "KSAC", // 41
-  "KMCC", // 42
-  "KMHR", // 43
-  "NULL", // 44 empty
-  "KPVF", // 45
-  "NULL", // 46 empty
-  "KBLU", // 47
-  "KTRK", // 48
-  "NULL", // 49 empty
-  "KTVL", // 50
-  "KO22", // 51
-  "KCPU", // 52
-  "KJAQ", // 53
-  "NULL", // 54 empty
-  "KSCK", // 55
-  "KMOD", // 56
-  "NULL", // 57 empty
-  "KMER", // 58
-  "KMCE", // 59
-  "NULL", // 60 empty
-  "KMAE", // 61
-  "KO88" // 62
+  "KFOT", // order of LEDs, starting with 1 should be KKIC; use VFR, WVFR, MVFR, IFR, LIFR for key; NULL for no airport
+  "KACV", // 2
+  "KRDD", // 3
+  "KO54", // 4
+  "KO86", // 5
+  "KMHS", // 6
+  "KCEC", // 7
+  "KBOK", // 8
+  "K4S1", // 9
+  "K3S8", // 10
+  "KMFR", // 11
+  "KLMT", // 12
+  "KRBG", // 13
+  "KOTH", // 14
+  "K6S2", // 15
+  "KEUG", // 16
+  "KCVO", // 17
+  "KONP", // 18
+  "KSLE", // 19
+  "KMMV", // 20
+  "KTMK", // 21
+  "KUAO", // 22
+  "KHIO", // 23
+  "KTTD", // 24
+  "KPDX", // 25
+  "KVUO", // 26
+  "KSPB", // 27
+  "KAST", // 28
+  "NULL", // 29
+  "NULL", // 30
+  "NULL", // 31
+  "NULL", // 32
+  "NULL", // 33
+  "NULL", // 34
+  "NULL", // 35
+  "NULL", // 36
+  "NULL", // 37
+  "NULL", // 38
+  "NULL", // 39
+  "NULL", // 40
+  "NULL", // 41
+  "NULL", // 42
+  "NULL", // 43
+  "NULL", // 44
+  "NULL", // 45
+  "VFR", // 46
+  "WVFR", // 47
+  "MVFR", // 48
+  "IFR", // 49
+  "LIFR", // 50
 });
 
 void setup() {
   //Initialize serial and wait for port to open:
-  Serial.begin(115200);
+  Serial.begin(74880);
   //pinMode(D1, OUTPUT); //Declare Pin mode
   //while (!Serial) {
   //    ; // wait for serial port to connect. Needed for native USB
@@ -129,8 +120,61 @@ void loop() {
     WiFi.mode(WIFI_STA);
     WiFi.hostname("LED Sectional " + WiFi.macAddress());
     //wifi_set_sleep_type(LIGHT_SLEEP_T); // use light sleep mode for all delays
+
+    if (channel == -1) { // only get a new BSSID if we don't already have one that works
+      int32_t RSSI = -999;
+      String bssidStr;
+
+      Serial.println("WiFi Scanning..");
+      Serial.println();
+
+      int numNetworks = WiFi.scanNetworks(false, true);
+      for (int i = 0; i < numNetworks; i++) {
+        Serial.print(WiFi.SSID(i));
+        Serial.print(" - ");
+        Serial.print(WiFi.BSSIDstr(i));
+        Serial.print(" - Channel: ");
+        Serial.print(WiFi.channel(i));
+        Serial.print(" - RSSI: ");
+        Serial.println(WiFi.RSSI(i));
+
+        if (WiFi.SSID(i) == ssid) {
+          if (WiFi.RSSI(i) > RSSI) {
+            RSSI = WiFi.RSSI(i);
+            BSSID = WiFi.BSSID(i);
+            channel = WiFi.channel(i);
+            bssidStr = WiFi.BSSIDstr();
+          }
+        }
+      }
+
+      WiFi.scanDelete();
+
+      Serial.println();
+
+      if (RSSI > -999) {
+        Serial.println("Found a viable WiFi AP:");
+        Serial.print(ssid);
+        Serial.print(" - ");
+        Serial.print(bssidStr);
+        Serial.print(" - Channel: ");
+        Serial.print(channel);
+        Serial.print(" - RSSI: ");
+        Serial.println(RSSI);
+
+      } else {
+        Serial.print("Failed to find a WiFi AP. Will retry in: ");
+        Serial.println(RETRY_TIMEOUT);
+        fill_solid(leds, NUM_AIRPORTS, CRGB::Orange);
+        FastLED.show();
+        ledStatus = true;
+        delay(RETRY_TIMEOUT);
+        return;
+      }
+    }
+
     Serial.print("WiFi connecting..");
-    WiFi.begin(ssid, pass);
+    WiFi.begin(ssid, pass, channel, BSSID);
     // Wait up to 1 minute for connection...
     for (c = 0; (c < WIFI_TIMEOUT) && (WiFi.status() != WL_CONNECTED); c++) {
       Serial.write('.');
@@ -141,6 +185,7 @@ void loop() {
       fill_solid(leds, NUM_AIRPORTS, CRGB::Orange);
       FastLED.show();
       ledStatus = true;
+      channel = -1;
       return;
     }
     Serial.println("OK!");
