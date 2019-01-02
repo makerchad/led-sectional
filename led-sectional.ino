@@ -261,7 +261,7 @@ bool getMetars(){
   String currentWxstring = "";
   String airportString = "";
   bool firstAirport = true;
-  for (int i = 1; i < (NUM_AIRPORTS); i++) {
+  for (int i = 0; i < NUM_AIRPORTS; i++) {
     if (airports[i] != "NULL" && airports[i] != "VFR" && airports[i] != "MVFR" && airports[i] != "WVFR" && airports[i] != "IFR" && airports[i] != "LIFR") {
       if (firstAirport) {
         firstAirport = false;
